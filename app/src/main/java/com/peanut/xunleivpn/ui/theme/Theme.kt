@@ -36,7 +36,7 @@ fun XunleiVPNTheme(darkTheme: Boolean = isSystemInDarkTheme(), content: @Composa
     )
 }
 
-private tailrec fun Context.findActivity(): Activity =
+tailrec fun Context.findActivity(): Activity =
     when (this) {
         is Activity -> this
         is ContextWrapper -> this.baseContext.findActivity()
