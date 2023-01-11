@@ -5,10 +5,8 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.os.Environment
 import android.os.Handler
 import android.provider.DocumentsContract
-import android.provider.Settings
 import android.util.Base64
 import android.util.Base64.decode
 import android.widget.Toast
@@ -48,28 +46,27 @@ import kotlin.concurrent.thread
 import kotlin.math.min
 
 class MainActivity : ComponentActivity() {
-    private val requestAllFileAccess = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && Environment.isExternalStorageManager()){
-            permissionAllFileAccess.value = true
+    private val requestDataAccess =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+            println(it.resultCode)
+            if (it.resultCode == Activity.RESULT_OK) {
+                contentResolver.takePersistableUriPermission(
+                    it.data!!.data!!, Intent.FLAG_GRANT_READ_URI_PERMISSION
+                            or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                )
+                permissionDataAccess.value = true
+            }
         }
-    }
-    private val requestDataAccess = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
-        println(it.resultCode)
-        if (it.resultCode == Activity.RESULT_OK) {
-            contentResolver.takePersistableUriPermission(
-                it.data!!.data!!, Intent.FLAG_GRANT_READ_URI_PERMISSION
-                        or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-            )
-            permissionDataAccess.value = true
-        }
-    }
-    private var permissionAllFileAccess = MutableStateFlow(false)
+
     private var permissionDataAccess = MutableStateFlow(false)
 
-    private fun isGranted():Boolean{
-        for (it in contentResolver.persistedUriPermissions){
-            if (it.uri.toString().startsWith("content://com.android.externalstorage.documents/tree/primary%3A" +
-                        "Android%2Fdata%2Fcom.xunlei.downloadprovider"))
+    private fun isGranted(): Boolean {
+        for (it in contentResolver.persistedUriPermissions) {
+            if (it.uri.toString().startsWith(
+                    "content://com.android.externalstorage.documents/tree/primary%3A" +
+                            "Android%2Fdata%2Fcom.xunlei.downloadprovider"
+                )
+            )
                 return true
         }
         return false
@@ -78,8 +75,10 @@ class MainActivity : ComponentActivity() {
     private fun requestAccessAndroidData() {
         try {
             val uri: Uri =
-                Uri.parse("content://com.android.externalstorage.documents/document/primary%3A" +
-                        "Android%2Fdata%2Fcom.xunlei.downloadprovider")
+                Uri.parse(
+                    "content://com.android.externalstorage.documents/document/primary%3A" +
+                            "Android%2Fdata%2Fcom.xunlei.downloadprovider"
+                )
             val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 intent.putExtra(DocumentsContract.EXTRA_INITIAL_URI, uri)
@@ -96,36 +95,16 @@ class MainActivity : ComponentActivity() {
     }
 
     @Composable
-    fun AllFileAccess(content: @Composable () -> Unit){
-        val context = LocalContext.current
-        val g by permissionAllFileAccess.collectAsState()
-        if (g || Build.VERSION.SDK_INT < Build.VERSION_CODES.R || Environment.isExternalStorageManager()) {
-            content()
-        }else{
-            Column(modifier = Modifier
-                .fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center
-            ) {
-                Button(onClick = {
-                    requestAllFileAccess.launch(
-                        Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
-                            this.data = Uri.fromParts("package", context.packageName, null)
-                        }
-                    )
-                }) {
-                    Text(text = "授予所有文件访问权")
-                }
-            }
-        }
-    }
-
-    @Composable
-    fun DataAccess(content: @Composable () -> Unit){
+    fun DataAccess(content: @Composable () -> Unit) {
         val g by permissionDataAccess.collectAsState()
         if (g || isGranted()) {
             content()
-        }else{
-            Column(modifier = Modifier
-                .fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center
+        } else {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
             ) {
                 Button(onClick = {
                     requestAccessAndroidData()
@@ -143,127 +122,128 @@ class MainActivity : ComponentActivity() {
         SettingManager.init(this)
         setContent {
             XunleiVPNTheme {
-                AllFileAccess {
-                    DataAccess {
-                        // A surface container using the 'background' color from the theme
-                        val context = LocalContext.current
-                        Surface(
-                            modifier = Modifier.fillMaxSize(),
-                            color = MaterialTheme.colorScheme.background
-                        ) {
-                            val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
-                            val scope = rememberCoroutineScope()
-                            val sheetState =
-                                rememberModalBottomSheetState(ModalBottomSheetValue.Hidden)
-                            val userFolder = remember { mutableStateListOf<DocumentFile>() }
-                            val currentUser by remember { mutableStateOf("Unknown") }
+                DataAccess {
+                    // A surface container using the 'background' color from the theme
+                    val context = LocalContext.current
+                    Surface(
+                        modifier = Modifier.fillMaxSize(),
+                        color = MaterialTheme.colorScheme.background
+                    ) {
+                        val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
+                        val scope = rememberCoroutineScope()
+                        val sheetState =
+                            rememberModalBottomSheetState(ModalBottomSheetValue.Hidden)
+                        val userFolder = remember { mutableStateListOf<DocumentFile>() }
+                        val currentUser by remember { mutableStateOf("Unknown") }
 
-                            BottomSheet(sheetState, sheetContent = {
-                                SheetContent(
-                                    folders = userFolder,
-                                    currentUser = currentUser
-                                ) { selectDocumentFile ->
-                                    scope.launch(Dispatchers.IO) {
-                                        delay(300)
-                                        sheetState.hide()
-                                        Cache.clearTask()
-                                        ls(selectDocumentFile, regex = ".*\\.js") { jsFile ->
-                                            try {
-                                                context.contentResolver.openInputStream(jsFile.uri)
-                                                    ?.let {
-                                                        val raw = it.bufferedReader()
-                                                            .use(BufferedReader::readText)
-                                                        it.close()
-                                                        println(
-                                                            raw.substring(
-                                                                0,
-                                                                min(raw.length, 50)
-                                                            )
+                        BottomSheet(sheetState, sheetContent = {
+                            SheetContent(
+                                folders = userFolder,
+                                currentUser = currentUser
+                            ) { selectDocumentFile ->
+                                scope.launch(Dispatchers.IO) {
+                                    delay(300)
+                                    sheetState.hide()
+                                    Cache.clearTask()
+                                    ls(selectDocumentFile, regex = ".*\\.js") { jsFile ->
+                                        try {
+                                            context.contentResolver.openInputStream(jsFile.uri)
+                                                ?.let {
+                                                    val raw = it.bufferedReader()
+                                                        .use(BufferedReader::readText)
+                                                    it.close()
+                                                    println(
+                                                        raw.substring(
+                                                            0,
+                                                            min(raw.length, 50)
                                                         )
-                                                        val jsonObject =
-                                                            JSONObject(
-                                                                String(
-                                                                    decode(
-                                                                        raw,
-                                                                        Base64.DEFAULT
-                                                                    )
+                                                    )
+                                                    val jsonObject =
+                                                        JSONObject(
+                                                            String(
+                                                                decode(
+                                                                    raw,
+                                                                    Base64.DEFAULT
                                                                 )
                                                             )
-                                                        val url = jsonObject.getString("Url")
-                                                        val name = jsFile.name!!.substring(
-                                                            1,
-                                                            jsFile.name!!.length - 3
                                                         )
-                                                        Cache.taskName.add(name)
-                                                        Cache.task.add(
-                                                            URLDecoder.decode(
-                                                                url,
-                                                                "UTF-8"
-                                                            )
+                                                    val url = jsonObject.getString("Url")
+                                                    val name = jsFile.name!!.substring(
+                                                        1,
+                                                        jsFile.name!!.length - 3
+                                                    )
+                                                    Cache.taskName.add(name)
+                                                    Cache.task.add(
+                                                        URLDecoder.decode(
+                                                            url,
+                                                            "UTF-8"
                                                         )
-                                                    }
-                                            } catch (e: Exception) {
-                                                e.printStackTrace()
+                                                    )
+                                                }
+                                        } catch (e: Exception) {
+                                            e.printStackTrace()
+                                        }
+                                    }
+                                    ls(selectDocumentFile, regex = ".*") { file ->
+                                        file.delete()
+                                    }
+                                }
+                            }
+                        }) {
+                            Scaffold(
+                                topBar = {
+                                    HomeTopAppBar(
+                                        title = "迅雷抓包",
+                                        scrollBehavior = scrollBehavior,
+                                        onSettingClicked = {
+                                            this@MainActivity.startActivity(
+                                                Intent(
+                                                    this@MainActivity,
+                                                    SettingActivity::class.java
+                                                )
+                                            )
+                                        },
+                                        onLoadFile = {
+                                            scope.launch(Dispatchers.IO) {
+                                                userFolder.clear()
+                                                ls(
+                                                    DocumentFile.fromTreeUri(
+                                                        context,
+                                                        Uri.parse(
+                                                            "content://com.android.externalstorage.documents/tree/primary%3A" +
+                                                                    "Android%2Fdata%2Fcom.xunlei.downloadprovider/document/primary%3AAndroid%2Fdata%2F" +
+                                                                    "com.xunlei.downloadprovider%2Ffiles%2FThunderDownload"
+                                                        )
+                                                    )!!, ".*"
+                                                ) { folder: DocumentFile ->
+                                                    userFolder.add(
+                                                        folder
+                                                    )
+                                                }
+                                            }
+                                            scope.launch { sheetState.show() }
+                                        },
+                                    )
+                                },
+                                floatingActionButton = {
+                                    SendFloatingActionButton {
+                                        thread {
+                                            Cache.forEachTask { name, url ->
+                                                Cache.send(
+                                                    name = name,
+                                                    url = url,
+                                                    context = this@MainActivity
+                                                )
                                             }
                                         }
                                     }
-                                }
-                            }) {
-                                Scaffold(
-                                    topBar = {
-                                        HomeTopAppBar(
-                                            title = "迅雷抓包",
-                                            scrollBehavior = scrollBehavior,
-                                            onSettingClicked = {
-                                                this@MainActivity.startActivity(
-                                                    Intent(
-                                                        this@MainActivity,
-                                                        SettingActivity::class.java
-                                                    )
-                                                )
-                                            },
-                                            onLoadFile = {
-                                                scope.launch(Dispatchers.IO) {
-                                                    userFolder.clear()
-                                                    ls(
-                                                        DocumentFile.fromTreeUri(
-                                                            context,
-                                                            Uri.parse(
-                                                                "content://com.android.externalstorage.documents/tree/primary%3A" +
-                                                                        "Android%2Fdata%2Fcom.xunlei.downloadprovider/document/primary%3AAndroid%2Fdata%2F" +
-                                                                        "com.xunlei.downloadprovider%2Ffiles%2FThunderDownload"
-                                                            )
-                                                        )!!, ".*"
-                                                    ) { folder: DocumentFile ->
-                                                        userFolder.add(
-                                                            folder
-                                                        )
-                                                    }
-                                                }
-                                                scope.launch { sheetState.show() }
-                                            },
-                                        )
-                                    },
-                                    floatingActionButton = {
-                                        SendFloatingActionButton {
-                                            thread {
-                                                Cache.forEachTask { name, url ->
-                                                    Cache.send(
-                                                        name = name,
-                                                        url = url,
-                                                        context = this@MainActivity
-                                                    )
-                                                }
-                                            }
-                                        }
-                                    },
-                                    modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-                                ) {
-                                    CaptureList(
-                                        modifier = Modifier.padding(it),
-                                        list = Cache.taskName
-                                    )
-                                }
+                                },
+                                modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
+                            ) {
+                                CaptureList(
+                                    modifier = Modifier.padding(it),
+                                    list = Cache.taskName
+                                )
                             }
                         }
                     }
@@ -281,20 +261,24 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun String.regex(regex: String, mode: Int):Boolean{
+    private fun String.regex(regex: String, mode: Int): Boolean {
         val p = Pattern.compile(regex, mode).matcher(this)
         return p.find()
     }
 
-    private fun ls(documentFile: DocumentFile, regex: String = ".*", onFind: (DocumentFile) -> Unit) {
+    private fun ls(
+        documentFile: DocumentFile,
+        regex: String = ".*",
+        onFind: (DocumentFile) -> Unit
+    ) {
         println("ls ${documentFile.uri}")
-        if (documentFile.isDirectory){
+        if (documentFile.isDirectory) {
             documentFile.listFiles().forEach {
-                if (it.name?.regex(regex, CASE_INSENSITIVE) == true){
+                if (it.name?.regex(regex, CASE_INSENSITIVE) == true) {
                     onFind(it)
                 }
             }
-        }else{
+        } else {
             println("are u ls a File?")
         }
     }
@@ -340,13 +324,17 @@ fun HomeTopAppBar(
 }
 
 @Composable
-fun SheetContent(folders: List<DocumentFile>, currentUser: String, onSelected: (DocumentFile) -> Unit) {
+fun SheetContent(
+    folders: List<DocumentFile>,
+    currentUser: String,
+    onSelected: (DocumentFile) -> Unit
+) {
     Spacer(modifier = Modifier.height(16.dp))
     if (folders.isNotEmpty()) {
         folders.forEach {
             FolderItem(
                 folder = it,
-                isCurrent = (it.name?:"").startsWith(currentUser, true),
+                isCurrent = (it.name ?: "").startsWith(currentUser, true),
                 onSelected = onSelected
             )
         }
@@ -356,7 +344,11 @@ fun SheetContent(folders: List<DocumentFile>, currentUser: String, onSelected: (
 }
 
 @Composable
-fun FolderItem(folder: DocumentFile, isCurrent: Boolean = false, onSelected: (DocumentFile) -> Unit) {
+fun FolderItem(
+    folder: DocumentFile,
+    isCurrent: Boolean = false,
+    onSelected: (DocumentFile) -> Unit
+) {
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier
         .clickable { onSelected(folder) }
         .padding(horizontal = 16.dp, vertical = 4.dp)
@@ -369,7 +361,10 @@ fun FolderItem(folder: DocumentFile, isCurrent: Boolean = false, onSelected: (Do
             contentDescription = null
         )
         Spacer(modifier = Modifier.width(20.dp))
-        Text(text = folder.name?:"", fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal)
+        Text(
+            text = folder.name ?: "",
+            fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal
+        )
     }
 }
 
